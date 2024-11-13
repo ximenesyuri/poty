@@ -1,14 +1,69 @@
 #! /bin/bash
 
+DEFAULT_SOURCE="py"
+DEFAULT_REPO="py"
+
 function poty(){
-    DEFAULT_REPO="gitea"
     function poty_pub(){
         poetry version $1 && \
         poetry build && \
         poetry publish -r $DEFAULT_REPO 
     }
     versions=("patch" "minor" "major")
-    if [[ "$1" == "pub" ]] ||
+    if [[ "$1" == "init" ]]; then
+        poetry init && \
+        poetry install 
+    elif [[ "$1" == "a" ]] ||
+         [[ "$1" == "add" ]]; then
+        if [[ -n "$2" ]]; then
+            if [[ -z "$3" ]]; then
+                poetry cache clear --all $DEFAULT_SOURCE > /dev/null 2>&1
+                poetry add $2
+            elif [[ "$3" == "--from" ]] ||
+                 [[ "$3" == "-f" ]];then
+                if [[ -n "$4" ]]; then
+                    poetry cache clear --all $4 > /dev/null 2>&1
+                    poetry add $2 --source $4
+                else
+                    echo "error: expected an argument."
+                    return 1
+                fi
+            else
+                poetry cache clear --all $DEFAULT_SOURCE > /dev/null 2>&1
+                poetry add "${@:2}"
+            fi
+        else
+            echo "error: expected an argument."
+            return 1
+        fi
+    elif [[ "$1" == "s" ]] ||
+         [[ "$1" == "sh" ]] ||
+         [[ "$1" == "shell" ]]; then
+        venv_path=$(poetry env info | grep Path: | grep pypoetry | awk '{print $2}')
+        if [[ -n "$1" ]]; then
+            source $venv_path/bin/activate
+        else
+            echo "error: a venv was not set."
+            echo "info: try \"poty i\"."
+            return 1
+        fi
+    elif [[ "$1" == "e" ]] ||
+         [[ "$1" == "env" ]]; then
+        if [[ -z "$2" ]]; then
+            poetry env info
+        elif [[ "$2" == "rm" ]] ||
+             [[ "$2" == "remove" ]]; then
+           venv_path=$(poetry env info | grep Path: | grep pypoetry | awk '{print $2}')
+           rm -r $venv_path
+        else
+            echo "error: option not defined."
+        fi
+    elif [[ "$1" == "i" ]] ||
+         [[ "$1" == "ins" ]] ||
+         [[ "$1" == "install" ]]; then
+        poetry lock
+        poetry install
+    elif [[ "$1" == "pub" ]] ||
        [[ "$1" == "publish" ]]; then
         if [[ -z "$2" ]]; then
             poty_pub patch
@@ -26,14 +81,17 @@ function poty(){
             git commit -m "$message"
             git push
         fi
-    elif [[ "$1" == "i" ]] ||
-         [[ "$1" == "ins" ]] ||
-         [[ "$1" == "install" ]]; then
-        poetry lock
-        poetry install
-    elif [[ "$1" =~ *.py ]]; then
-        poetry run python3 $1
+    elif [[ "$1" == *.py ]]; then
+        venv_path=$(poetry env info | grep Path: | grep pypoetry | awk '{print $2}')
+        if [[ -n "$venv_path" ]]; then
+            $venv_path/bin/python3 "$1"
+        else
+            echo "error: a venv was not set."
+            echo "info: try \"poty i\"."
+            return 1
+        fi
     else
         poetry "$@"
     fi
 }
+
