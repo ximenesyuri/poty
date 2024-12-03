@@ -1,97 +1,201 @@
 #! /bin/bash
 
-DEFAULT_SOURCE="py"
-DEFAULT_REPO="py"
-
 function poty(){
-    function poty_pub(){
+    VERSIONS=("patch" "minor" "major")
+    DEFAULT_SOURCE="py"
+    DEFAULT_REPO="py"
+    DEFAULT_VERSION="patch"
+
+    pub(){
         poetry version $1 && \
         poetry build && \
-        poetry publish -r $DEFAULT_REPO 
+        poetry publish -r $DEFAULT_REPO
     }
-    versions=("patch" "minor" "major")
-    if [[ "$1" == "init" ]]; then
-        poetry init && \
-        poetry install 
-    elif [[ "$1" == "a" ]] ||
-         [[ "$1" == "add" ]]; then
-        if [[ -n "$2" ]]; then
-            if [[ -z "$3" ]]; then
-                poetry cache clear --all $DEFAULT_SOURCE > /dev/null 2>&1
-                poetry add $2
-            elif [[ "$3" == "--from" ]] ||
-                 [[ "$3" == "-f" ]];then
-                if [[ -n "$4" ]]; then
-                    poetry cache clear --all $4 > /dev/null 2>&1
-                    poetry add $2 --source $4
-                else
-                    echo "error: expected an argument."
-                    return 1
-                fi
-            else
-                poetry cache clear --all $DEFAULT_SOURCE > /dev/null 2>&1
-                poetry add "${@:2}"
-            fi
-        else
+
+    push(){
+        if [[ -z "$1" ]]; then
             echo "error: expected an argument."
             return 1
-        fi
-    elif [[ "$1" == "s" ]] ||
-         [[ "$1" == "sh" ]] ||
-         [[ "$1" == "shell" ]]; then
-        venv_path=$(poetry env info | grep Path: | grep pypoetry | awk '{print $2}')
-        if [[ -n "$1" ]]; then
-            source $venv_path/bin/activate
         else
-            echo "error: a venv was not set."
-            echo "info: try \"poty i\"."
-            return 1
-        fi
-    elif [[ "$1" == "e" ]] ||
-         [[ "$1" == "env" ]]; then
-        if [[ -z "$2" ]]; then
-            poetry env info
-        elif [[ "$2" == "rm" ]] ||
-             [[ "$2" == "remove" ]]; then
-           venv_path=$(poetry env info | grep Path: | grep pypoetry | awk '{print $2}')
-           rm -r $venv_path
-        else
-            echo "error: option not defined."
-        fi
-    elif [[ "$1" == "i" ]] ||
-         [[ "$1" == "ins" ]] ||
-         [[ "$1" == "install" ]]; then
-        poetry lock
-        poetry install
-    elif [[ "$1" == "pub" ]] ||
-       [[ "$1" == "publish" ]]; then
-        if [[ -z "$2" ]]; then
-            poty_pub patch
-        elif [[ "${versions[@]}" =~ "$2" ]]; then
-            poty_pub "$2"
-        else
-            echo "error: invalid argument."
-        fi
-    elif [[ "$1" == "push" ]]; then
-        if [[ -z "$2" ]]; then
-            echo "error: expected an argument."
-        else
-            message="${@:2}"
+            local message="$@"
             git add .
-            git commit -m "$message"
+            git commit -m "$message" || return 1
             git push
         fi
-    elif [[ "$1" == *.py ]]; then
-        venv_path=$(poetry env info | grep Path: | grep pypoetry | awk '{print $2}')
-        if [[ -n "$venv_path" ]]; then
-            $venv_path/bin/python3 "$1"
+    }
+
+    pyproject() {
+        local dir="$1"
+        while [[ "$dir" != "/" ]]; do
+            if [[ -f "$dir/pyproject.toml" ]]; then
+                echo "$dir"
+                return 0
+            fi
+            dir="$(dirname "$dir")"
+        done
+        echo ""
+        return 1
+    }
+
+    get_name(){
+        sed -n '/\[tool.poetry\]/,/^[^[]/s/^name *= *"\(.*\)"/\1/p' $1 | tr '_' '-'
+    }
+
+    get_venv(){
+        if [[ -n "$(pyproject "$1")" ]]; then
+            local name
+            name=$(get_name "$(pyproject $1)/pyproject.toml")
+            local venv_path
+            venv_path=($(find "$HOME/.cache/pypoetry/virtualenvs" -mindepth 1 -maxdepth 1 -type d -name "$name*"))
+            if [[ -n "${venv_path[0]}" ]]; then
+                if [[ -n "${venv_path[1]}" ]]; then
+                    poetry env info | grep 'Path:' | grep 'pypoetry' | cut -d' ' -f2
+                else
+                    echo "${venv_path[0]}"
+                fi
+            else
+                return 1
+            fi
         else
-            echo "error: a venv was not set."
-            echo "info: try \"poty i\"."
             return 1
         fi
-    else
+    }
+
+    py() {
+        venv_path="$(get_venv "$1")"
+        if [[ -n "$venv_path" ]]; then
+            python_exec="$venv_path/bin/python3"
+            "$python_exec" "$2"
+        else
+            echo "error: virtual environment not found. Try \"poty venv new\"."
+            return 1
+        fi 
+    } 
+
+    help(){
+        echo "USAGE"
+        echo "    poty [command] [options]"
+        echo ""
+        echo "COMMANDS"
+        echo "    I, init ...................... Initialize the project for Poetry"
+        echo "    a, add [package] ............. Add a package with Poetry"
+        echo "    s, sh, shell ................. Activate the Poetry virtual environment"
+        echo "    v, venv [option] ............. Manage virtual environments"
+        echo "        rm, remove ............... Remove the current virtual environment"
+        echo "        n, new ................... Create a new virtual environment"
+        echo "    i, ins, install .............. Lock and install dependencies with Poetry"
+        echo "    P, pub, publish .............. Publish the package (default version type)"
+        echo "    p, push [commit message] ..... Commit and push changes to Git"
+        echo "    [path/to/script.py] .......... Run a Python script in its virtual environment"
+        echo "    poetry [command] ............. Execute any command of poetry"
+        echo "    help, --help, -h ............. Display this help message" 
+    }
+
+    if [[ "$1" == "-h" ]] ||
+       [[ "$1" == "--help" ]] ||
+       [[ "$1" == "help" ]]; then
+        help
+    elif [[ "$1" == "poetry" ]]; then
+        shift 1
         poetry "$@"
-    fi
+    elif [[ "$1" == "I" ]] || 
+         [[ "$1" == "init" ]]; then
+        if [[ -n "$(pyproject $PWD)" ]]; then
+            echo "Current dir is already initialized."
+            return 1
+        fi
+        poetry init && poetry install
+    else
+        if [[ -n "$(pyproject $PWD)" ]]; then 
+            if [[ "$1" == "a" ]] ||
+               [[ "$1" == "add" ]]; then
+                if [[ -n "$2" ]]; then
+                    if [[ -z "$3" ]]; then
+                        poetry cache clear --all $DEFAULT_SOURCE > /dev/null 2>&1
+                        poetry add $2
+                    elif [[ "$3" == "-f" ]] ||
+                       [[ "$3" == "--from" ]]; then
+                        if [[ -n "$4" ]]; then
+                            poetry cache clear --all $4 > /dev/null 2>&1
+                            poetry add $2 --source $4
+                        else
+                            echo "error: expecting an argument."
+                            return 1
+                        fi
+                    else
+                        poetry cache clear --all $DEFAULT_SOURCE > /dev/null 2>&1
+                        poetry add "${@:2}"
+                    fi
+                else
+                    echo "error: missing argument."
+                    return 1
+                fi
+            elif [[ "$1" == "s" ]] ||
+                 [[ "$1" == "sh" ]] ||
+                 [[ "$1" == "shell" ]]; then
+                venv_path=$(get_venv $PWD) 
+                if [[ "$?" == "1" ]]; then
+                    echo "error: no venv was found. Try \"poty i\"."
+                    return 1
+                fi
+                source $venv_path/bin/activate
+            elif [[ "$1" == "v" ]] ||
+                 [[ "$1" == "venv" ]]; then
+                if [[ -z "$2" ]]; then
+                    poetry env info
+                elif [[ "$2" == "rm" ]] ||
+                     [[ "$2" == "remove" ]]; then
+                    venv_path=$(get_venv $PWD)
+                    if [[ "$?" == "1" ]]; then
+                        echo "error: no venv was found. Try \"poty i\"."
+                        return 1
+                    fi
+                    rm -r $venv_path
+                elif [[ "$2" == "n" ]] ||
+                     [[ "$2" == "new" ]]; then
+                    poty venv rm
+                    poty install
+                else
+                    echo "error: option not defined."
+                fi
+            elif [[ "$1" == "i" ]] ||
+                 [[ "$1" == "ins" ]] || 
+                 [[ "$1" == "install" ]]; then
+                poetry lock
+                poetry install
+            elif [[ "$1" == "P" ]] ||
+                 [[ "$1" == "pub" ]] || 
+                 [[ "$1" == "publish" ]]; then
+                if [[ -z "$2" ]]; then
+                    pub $DEFAULT_VERSION
+                elif [[ " ${VERSIONS[@]} " =~ " $2 " ]]; then
+                    pub "$2"
+                else
+                    echo "error: invalid argument."
+                fi
+            elif [[ "$1" == "p" || "$1" == "push" ]]; then
+                push "${@:2}"
+            elif [[ "$1" == *.py ]]; then 
+                py $PWD $1
+            else
+                echo "error: option not defined."
+                return 1
+            fi
+        else
+            if [[ "$1" == *.py ]]; then
+                pyproject_dir="$(pyproject "${1%/*}")"
+                if [[ -n "$pyproject_dir" ]]; then
+                    py $pyproject_dir $1 
+                elif [[ -n "$POTY_DEFAULT_VENV" ]]; then
+                    "$POTY_DEFAULT_VENV/bin/python3" "$1"
+                else
+                    python3 "$1"
+                fi
+            else
+                echo "error: this is not an initialized directory. Try \"poty init\"."
+                return 1
+            fi
+        fi
+    fi 
 }
 
